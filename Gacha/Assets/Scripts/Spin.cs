@@ -1,128 +1,147 @@
+﻿using System;
 using System.Collections;
 using TMPro;
+using Unity.VisualScripting;
 using UnityEngine;
 
 public class Spin : MonoBehaviour
 {
+    public event EventHandler<OnHandleResultWithoutScreenEventArg> OnHandleResultWithoutScreen;
+
+    public class OnHandleResultWithoutScreenEventArg : EventArgs
+    {
+        public TextMeshProUGUI nameItem;
+    }
+
     [SerializeField] private LayerMask spinMask;
     [SerializeField] private float speedSpin;
     [SerializeField] private GameObject collection;
     [SerializeField] private Transform arrow;
     [SerializeField] private RandomItem randomItem;
 
-    [SerializeField] private GameObject textResult;
-
-    private float startSpin;
+    private float startSpinSpeed;
     private bool isSpinning;
-    private bool isSpinningFollowResulItem;
+    private bool isSpinningToResult;
     private Transform itemSelected;
-    private int indexItemSelected;
-
-    private float minDis = Mathf.Infinity;
+    private float minDistance = Mathf.Infinity;
+    private Vector3 posArrow;
 
     private void Awake()
     {
-        startSpin = speedSpin;
+        startSpinSpeed = speedSpin;
+
+        posArrow = arrow.position;
+
         randomItem.OnRandomResultItem += RandomItem_OnRandomResultItem;
     }
 
     private void RandomItem_OnRandomResultItem(object sender, RandomItem.OnRandomResultItemEventArgs e)
     {
         itemSelected = e.itemSelected;
-        indexItemSelected = collection.GetComponent<Collection>().items.IndexOf(itemSelected);
-        isSpinningFollowResulItem = true;
+
+        isSpinningToResult = true;
     }
 
     private void Update()
     {
-        if (Input.GetMouseButtonDown(0) && !isSpinning)
+        if (Input.GetMouseButtonDown(0) && !isSpinning && IsPressButtonSpin())
         {
-            if (IsPressButtonSpin())
+            isSpinning = true;
+
+            if (isSpinningToResult)
             {
-                isSpinning = true;
-                if (isSpinningFollowResulItem)
-                {
-                    StartSpinTowardsResult();
-                }
-                else
-                {
-                    StartRandomSpin();
-                }
+                StartSpinTowardsResult();
+            }
+            else
+            {
+                StartRandomSpin();
             }
         }
     }
 
     private void StartRandomSpin()
     {
-        speedSpin = startSpin;
-        Invoke("ExcuteSpin",0f);
+        speedSpin = startSpinSpeed;
+
+        StartCoroutine(ExecuteSpinCoroutine());
     }
 
     private void StartSpinTowardsResult()
     {
-        speedSpin = startSpin;
-        Invoke("SpinTowardsResult", 0f);
+        speedSpin = startSpinSpeed;
+
+        StartCoroutine(SpinTowardsResultCoroutine());
     }
 
-    private void ExcuteSpin()
+    private IEnumerator ExecuteSpinCoroutine()
     {
-        if (speedSpin <= 0)
+        while (speedSpin > 1.5f)
         {
-            isSpinning = false;
-            //CancelInvoke("ExcuteSpin");
-            Debug.Log(collection.GetComponent<Collection>().CaculatePositionItemSelected(arrow));
-            return;
+            collection.transform.Rotate(0f, speedSpin * Time.deltaTime, 0f);
+
+            speedSpin = Mathf.Lerp(speedSpin, 0f, Time.deltaTime * 0.3f);
+
+            yield return null;
         }
-        collection.transform.Rotate(0f, speedSpin * Time.deltaTime, 0f);
-        speedSpin -= Time.deltaTime * Random.Range(50f, 100f);
-        InvokeRepeating("ExcuteSpin", 0f, 0f);
+        isSpinning = false;
+
+        TextMeshProUGUI selectedText = collection.GetComponent<Collection>().CaculatePositionItemSelected(posArrow);
+
+        ActivateResultWithoutScreen(selectedText);
     }
 
-    private void SpinTowardsResult()
+    private IEnumerator SpinTowardsResultCoroutine()
     {
-        float dis = Vector3.Distance(arrow.position, itemSelected.position);
-        
-        if (minDis > dis)
+        while (isSpinning)
         {
-            //Debug.Log(dis);
-            minDis = dis;
-        }
-        if (speedSpin <= 30f)
-        {
-            if (Mathf.Abs(dis-minDis) < .001f)
+            float distance = Vector3.Distance(posArrow, itemSelected.position);
+
+            if (minDistance > distance)
             {
-                isSpinning = false;
-                minDis = Mathf.Infinity;
-                isSpinningFollowResulItem = false;
-                itemSelected.GetComponent<TextMeshProUGUI>().color = Color.white;
-                Debug.Log(itemSelected.GetComponent<TextMeshProUGUI>().text);
-                return;
+                minDistance = distance;
+            }
+
+            if (speedSpin <= 50f)
+            {
+                if (Mathf.Abs(distance - minDistance) < 0.01f)
+                {
+                    StopSpinning();
+                    ActivateResultWithoutScreen(itemSelected.GetComponent<TextMeshProUGUI>());
+                    yield break;
+                }
+                speedSpin = Mathf.Lerp(speedSpin, 0f, Time.deltaTime * 0.1f);
             }
             else
             {
-                speedSpin = 30f;
-                collection.transform.Rotate(0f, speedSpin * Time.deltaTime, 0f);
+                speedSpin = Mathf.Lerp(speedSpin, 0f, Time.deltaTime * 0.3f);
             }
-        }
-        else
-        {
+
             collection.transform.Rotate(0f, speedSpin * Time.deltaTime, 0f);
-            speedSpin -= Time.deltaTime * Random.Range(50f, 100f);
+            yield return null;
         }
-        InvokeRepeating("SpinTowardsResult", 0f, 0f);
+        
     }
 
     private bool IsPressButtonSpin()
     {
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        RaycastHit hit;
-        if (Physics.Raycast(ray, out hit, 100f, spinMask))
-        {
-            if (hit.collider != null)
-            {
-                return true;
-            }
-        }
-        return false;
+
+        return Physics.Raycast(ray, out RaycastHit hit, 100f, spinMask) && hit.collider != null;
+    }
+
+    private void ActivateResultWithoutScreen(TextMeshProUGUI nameItem)
+    {
+        OnHandleResultWithoutScreen?.Invoke(this, new OnHandleResultWithoutScreenEventArg { nameItem = nameItem });
+    }
+
+    private void StopSpinning()
+    {
+        isSpinning = false;
+
+        isSpinningToResult = false;
+
+        minDistance = Mathf.Infinity;
+
+        itemSelected.GetComponent<TextMeshProUGUI>().color = Color.white;
     }
 }
